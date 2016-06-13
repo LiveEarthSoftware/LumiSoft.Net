@@ -189,6 +189,7 @@ namespace LumiSoft.Net.Media
             if(!m_IsRunning){
                 return;
             }
+            m_IsRunning = false;
 
             if(m_pWaveIn != null){
                 m_pWaveIn.Dispose();

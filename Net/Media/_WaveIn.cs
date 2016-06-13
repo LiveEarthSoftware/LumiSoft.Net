@@ -554,31 +554,32 @@ namespace LumiSoft.Net.Media
 
         #endregion
 
-        private bool                         m_IsDisposed    = false;
-        private AudioInDevice                m_pInDevice     = null;
-        private int                          m_SamplesPerSec = 8000;
-        private int                          m_BitsPerSample = 8;
-        private int                          m_Channels      = 1;
-        private int                          m_BufferSize    = 400;
-        private IntPtr                       m_pWavDevHandle = IntPtr.Zero;
-        private int                          m_BlockSize     = 0;
-        private Dictionary<long,BufferItem>  m_pBuffers      = null;
-        private waveInProc                   m_pWaveInProc   = null;
-        private bool                         m_IsRecording   = false;
-        private object                       m_pLock         = new object();
-            
-        /// <summary>
-        /// Default constructor.
-        /// </summary>
-        /// <param name="device">Input device.</param>
-        /// <param name="samplesPerSec">Sample rate, in samples per second (hertz). For PCM common values are 
-        /// 8.0 kHz, 11.025 kHz, 22.05 kHz, and 44.1 kHz.</param>
-        /// <param name="bitsPerSample">Bits per sample. For PCM 8 or 16 are the only valid values.</param>
-        /// <param name="channels">Number of channels.</param>
-        /// <param name="bufferSize">Specifies recording buffer size.</param>
-        /// <exception cref="ArgumentNullException">Is raised when <b>outputDevice</b> is null.</exception>
-        /// <exception cref="ArgumentException">Is raised when any of the aruments has invalid value.</exception>
-        public _WaveIn(AudioInDevice device,int samplesPerSec,int bitsPerSample,int channels,int bufferSize)
+        private bool                         m_IsDisposed          = false;
+        private AudioInDevice                m_pInDevice           = null;
+        private int                          m_SamplesPerSec       = 8000;
+        private int                          m_BitsPerSample       = 8;
+        private int                          m_Channels            = 1;
+        private int                          m_BufferSize          = 400;
+        private IntPtr                       m_pWavDevHandle       = IntPtr.Zero;
+        private int                          m_BlockSize           = 0;
+        private Dictionary<long,BufferItem>  m_pBuffers            = null;
+        private waveInProc                   m_pWaveInProc         = null;
+        private bool                         m_IsRecording         = false;
+        private object                       m_pLock               = new object();
+        private object                       m_pFixWaveInDeadlock  = new object();
+
+		/// <summary>
+		/// Default constructor.
+		/// </summary>
+		/// <param name="device">Input device.</param>
+		/// <param name="samplesPerSec">Sample rate, in samples per second (hertz). For PCM common values are 
+		/// 8.0 kHz, 11.025 kHz, 22.05 kHz, and 44.1 kHz.</param>
+		/// <param name="bitsPerSample">Bits per sample. For PCM 8 or 16 are the only valid values.</param>
+		/// <param name="channels">Number of channels.</param>
+		/// <param name="bufferSize">Specifies recording buffer size.</param>
+		/// <exception cref="ArgumentNullException">Is raised when <b>outputDevice</b> is null.</exception>
+		/// <exception cref="ArgumentException">Is raised when any of the aruments has invalid value.</exception>
+		public _WaveIn(AudioInDevice device,int samplesPerSec,int bitsPerSample,int channels,int bufferSize)
         {
             if(device == null){
                 throw new ArgumentNullException("device");
@@ -642,21 +643,25 @@ namespace LumiSoft.Net.Media
             m_IsDisposed = true;
 
             try{
-                // If recording, we need to reset wav device first.
-                waveInReset(m_pWavDevHandle);
-                
-                // If there are unprepared wav headers, we need to unprepare these.
-                foreach(BufferItem item in m_pBuffers.Values){
-                    item.Dispose();
-                }
-                
-                // Close input device.
-                waveInClose(m_pWavDevHandle);
+	            lock (m_pFixWaveInDeadlock)
+	            {
+		            // If recording, we need to reset wav device first.
+		            waveInReset(m_pWavDevHandle);
 
-                m_pInDevice     = null;
-                m_pWavDevHandle = IntPtr.Zero;
+		            // If there are unprepared wav headers, we need to unprepare these.
+		            foreach (BufferItem item in m_pBuffers.Values)
+		            {
+			            item.Dispose();
+		            }
 
-                this.AudioFrameReceived = null;
+		            // Close input device.
+		            waveInClose(m_pWavDevHandle);
+
+		            m_pInDevice = null;
+		            m_pWavDevHandle = IntPtr.Zero;
+
+		            this.AudioFrameReceived = null;
+	            }
             }
             catch{                
             }
@@ -726,25 +731,32 @@ namespace LumiSoft.Net.Media
             }
 
             try{
-                if(uMsg == WavConstants.MM_WIM_DATA){                            
-                    // Free buffer and queue it for reuse.
-                    //ThreadPool.QueueUserWorkItem(new WaitCallback(delegate(object state){
-                    try{
-                        if(m_IsDisposed){
-                            return;
-                        }
+	            lock (m_pFixWaveInDeadlock)
+	            {
+		            if (uMsg == WavConstants.MM_WIM_DATA)
+		            {
+			            // Free buffer and queue it for reuse.
+			            //ThreadPool.QueueUserWorkItem(new WaitCallback(delegate(object state){
+			            try
+			            {
+				            if (m_IsDisposed)
+				            {
+					            return;
+				            }
 
-                        BufferItem bufferItem = m_pBuffers[dwParam1.ToInt64()];
-                          
-                        OnAudioFrameReceived(bufferItem.EventArgs);
-                                       
-                        bufferItem.Queue(true);
-                    }
-                    catch(Exception x){
-                        Console.WriteLine(x.ToString());
-                    }
-                    //}));
-                }
+				            BufferItem bufferItem = m_pBuffers[dwParam1.ToInt64()];
+
+				            OnAudioFrameReceived(bufferItem.EventArgs);
+
+				            bufferItem.Queue(true);
+			            }
+			            catch (Exception x)
+			            {
+				            Console.WriteLine(x.ToString());
+			            }
+			            //}));
+		            }
+	            }
             }
             catch{
                 // We don't care about errors here.
